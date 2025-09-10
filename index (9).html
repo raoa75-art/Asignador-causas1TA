@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asignación – Visualizador de cargas (3 funcionarios)</title>
+<style>
+  :root { --bg:#f7f7fb; --card:#fff; --muted:#667085; --border:#e9e9f2; --ink:#0f172a; --brand:#0ea5e9; }
+  * { box-sizing: border-box; }
+  body { font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:var(--bg); margin:0; padding:24px; color:var(--ink); }
+  .container { max-width: 1200px; margin: 0 auto; }
+  h1 { margin:0 0 8px 0; font-size: 22px; }
+  h2 { margin:0 0 10px 0; font-size: 18px; }
+  h3 { margin:0 0 8px 0; }
+  .sub { margin:0 0 16px 0; color:var(--muted); font-size:13px; }
+  .grid { display:grid; gap:16px; }
+  @media (min-width: 960px) { .grid-2 { grid-template-columns: 1fr 1fr; } .grid-3 { grid-template-columns: repeat(3, 1fr);} }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  label { font-size:12px; color:#333; display:block; margin-bottom:6px; }
+  input[type=number], select { width:100%; padding:8px; border:1px solid #ddd; border-radius:8px; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { padding:8px; border-bottom:1px solid #eee; text-align:left; white-space:nowrap; }
+  .btn { padding:10px 14px; border-radius:10px; border:1px solid #ddd; background:#fff; cursor:pointer; }
+  .btn:hover { background:#f3f3f8; }
+  .btn.primary { background:var(--brand); color:#fff; border-color:var(--brand); }
+  .footer { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; align-items:center; }
+  .svgwrap { width:100%; height:320px; background:#fafafa; border:1px dashed #e5e5ef; border-radius:12px; display:flex; align-items:center; justify-content:center; }
+  .legend { display:flex; gap:10px; align-items:center; font-size:12px; color:#555; margin-top:6px; flex-wrap:wrap; }
+  .sw { width:12px; height:12px; display:inline-block; border-radius:3px; border:1px solid #ccc; }
+  .scroll-x { overflow-x:auto; }
+  .pill { padding:4px 8px; border-radius:999px; background:#eef6ff; border:1px solid #cde4ff; font-size:12px; color:#0b4b8e; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>Asignación – Visualizador de cargas</h1>
+  <p class="sub">
+    Capacidad por funcionario editable (por defecto <b>20</b>). Política: <b>menor carga</b> \(L=i·A+j·B+k·C\), <b>no repetir consecutivo</b>; empate → preferencia por <i>aptitud requerida</i> (A/B/C, sin penalizar), luego azar.
+  </p>
+
+  <!-- CONTROLES -->
+  <div class="grid grid-2">
+    <div class="card">
+      <h3>Ponderaciones de complejidad</h3>
+      <label>i (Alta - A) <input id="w_i" type="number" step="0.01" value="1.0"></label>
+      <label>j (Media - B) <input id="w_j" type="number" step="0.01" value="0.5"></label>
+      <label>k (Baja - C) <input id="w_k" type="number" step="0.01" value="0.25"></label>
+      <p class="sub">Las ponderaciones afectan la <b>carga L</b>; la aptitud solo ordena empates.</p>
+    </div>
+
+    <div class="card">
+      <h3>Asignación en línea (1 causa)</h3>
+      <label>Tipo de causa (complejidad)
+        <select id="causeType">
+          <option value="A">A (Alta)</option>
+          <option value="B" selected>B (Media)</option>
+          <option value="C">C (Baja)</option>
+        </select>
+      </label>
+      <label>Aptitud requerida para la causa
+        <select id="aptReq">
+          <option value="A">A (Alta)</option>
+          <option value="B" selected>B (Media)</option>
+          <option value="C">C (Baja)</option>
+        </select>
+      </label>
+      <div class="footer">
+        <button class="btn primary" onclick="asignarUna()">Asignar 1 causa</button>
+        <button class="btn" onclick="deshacer()">Deshacer última</button>
+        <span class="pill" id="lastTag">Último asignado: —</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <h3>Capacidades máximas</h3>
+    <div class="grid grid-3">
+      <label>Ricardo Ortiz Arellano <input id="cap1" type="number" step="1" value="20"></label>
+      <label>Cecilia Aqueveque González <input id="cap2" type="number" step="1" value="20"></label>
+      <label>Adolfo Ilufi Roca <input id="cap3" type="number" step="1" value="20"></label>
+    </div>
+    <p class="sub">Si alguien llega a su tope, no recibe más asignaciones.</p>
+  </div>
+
+  <div class="card" style="margin-top:12px">
+    <h3>Estado actual por funcionario (editable)</h3>
+    <div class="grid grid-3">
+      <div>
+        <h4>Ricardo Ortiz Arellano</h4>
+        <label>A (Alta) <input id="f1A" type="number" step="1" value="3"></label>
+        <label>B (Media) <input id="f1B" type="number" step="1" value="5"></label>
+        <label>C (Baja) <input id="f1C" type="number" step="1" value="4"></label>
+        <div style="display:none">
+          <label>Idoneidad D
+            <select id="f1D"><option value="1" selected>1</option><option value="0.5">0.5</option><option value="0.25">0.25</option></select>
+          </label>
+        </div>
+      </div>
+      <div>
+        <h4>Cecilia Aqueveque González</h4>
+        <label>A (Alta) <input id="f2A" type="number" step="1" value="2"></label>
+        <label>B (Media) <input id="f2B" type="number" step="1" value="6"></label>
+        <label>C (Baja) <input id="f2C" type="number" step="1" value="4"></label>
+        <div style="display:none">
+          <label>Idoneidad D
+            <select id="f2D"><option value="1" selected>1</option><option value="0.5">0.5</option><option value="0.25">0.25</option></select>
+          </label>
+        </div>
+      </div>
+      <div>
+        <h4>Adolfo Ilufi Roca</h4>
+        <label>A (Alta) <input id="f3A" type="number" step="1" value="2"></label>
+        <label>B (Media) <input id="f3B" type="number" step="1" value="6"></label>
+        <label>C (Baja) <input id="f3C" type="number" step="1" value="1"></label>
+        <div style="display:none">
+          <label>Idoneidad D
+            <select id="f3D"><option value="1" selected>1</option><option value="0.5">0.5</option><option value="0.25">0.25</option></select>
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="footer">
+      <button class="btn" onclick="guardarComoInicial()">Guardar como “Inicial”</button>
+      <button class="btn" onclick="restablecer()">Restablecer</button>
+    </div>
+    <p class="sub">“Guardar como Inicial” actualiza la línea base para el gráfico <i>Inicial vs Actual</i>.</p>
+  </div>
+
+  <!-- SECTION 1: Visualizador de cargas -->
+  <div id="viz" class="card" style="margin-top:16px">
+    <h2>Visualizador de cargas</h2>
+    <div id="tableWrap" class="scroll-x"></div>
+    <div class="svgwrap" style="margin-top:12px"><svg id="chartStack" width="100%" height="100%"></svg></div>
+    <div class="legend">
+      <span class="sw" style="background:#94a3b8"></span> A (Alta)
+      <span class="sw" style="background:#cbd5e1"></span> B (Media)
+      <span class="sw" style="background:#e5e7eb"></span> C (Baja)
+    </div>
+    <div class="footer">
+      <button class="btn" onclick="descargarCSV()">Descargar CSV (estado)</button>
+    </div>
+  </div>
+
+  <!-- SECTION 2: Totales inicial vs actual -->
+  <div id="totales" class="card" style="margin-top:16px">
+    <h2>Total por funcionario: <span class="sub">Inicial vs Actual</span></h2>
+    <div class="svgwrap" style="margin-top:8px"><svg id="chartTotals" width="100%" height="100%"></svg></div>
+    <div class="legend">
+      <span class="sw" style="background:#d1d5db"></span> Inicial
+      <span class="sw" style="background:#6b7280"></span> Actual
+    </div>
+  </div>
+
+  <!-- SECTION 3: Distribución de aptitud requerida -->
+  <div id="apt" class="card" style="margin-top:16px">
+    <h2>Distribución de aptitud requerida (sesión)</h2>
+    <div class="svgwrap" style="margin-top:8px"><svg id="chartApt" width="100%" height="100%"></svg></div>
+    <div class="legend">
+      <span class="sw" style="background:#94a3b8"></span> Aptitud A
+      <span class="sw" style="background:#cbd5e1"></span> Aptitud B
+      <span class="sw" style="background:#e5e7eb"></span> Aptitud C
+    </div>
+    <div class="footer">
+      <span class="pill" id="lastTag2">Último asignado: —</span>
+    </div>
+  </div>
+
+  <!-- SECTION 4: Historial -->
+  <div id="hist" class="card" style="margin-top:16px">
+    <h2>Historial de asignaciones (sesión)</h2>
+    <div id="logWrap" class="scroll-x"></div>
+    <div class="footer">
+      <button class="btn" onclick="descargarLogCSV()">Descargar log (historial)</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const NAMES = [
+  "Ricardo Ortiz Arellano",
+  "Cecilia Aqueveque González",
+  "Adolfo Ilufi Roca"
+];
+
+function gid(id){ return document.getElementById(id); }
+
+function getInputs(){
+  const i = parseFloat(gid('w_i').value||'0');
+  const j = parseFloat(gid('w_j').value||'0');
+  const k = parseFloat(gid('w_k').value||'0');
+  const n = NAMES.length;
+  const A=[],B=[],C=[],D=[],caps=[];
+  for(let p=1; p<=n; p++){
+    A.push(parseInt((gid(`f${p}A`)?.value)||'0'));
+    B.push(parseInt((gid(`f${p}B`)?.value)||'0'));
+    C.push(parseInt((gid(`f${p}C`)?.value)||'0'));
+    D.push(parseFloat((gid(`f${p}D`)?.value)||'1'));
+    caps.push(parseInt((gid(`cap${p}`)?.value)||'20'));
+  }
+  return {i,j,k,A,B,C,D,caps};
+}
+
+function weightedLoad(i,j,k,a,b,c){ return i*a + j*b + k*c; }
+function aptTarget(apt){ return apt==='A' ? 1 : (apt==='B' ? 0.5 : 0.25); }
+
+function pickGreedyOne(params, apt){
+  const {i,j,k,A,B,C,D,caps} = params;
+  const n = NAMES.length;
+  const loads = new Array(n).fill(0).map((_,idx)=> weightedLoad(i,j,k, A[idx], B[idx], C[idx]));
+  let eligible = [];
+  for(let idx=0; idx<n; idx++){
+    if (A[idx]+B[idx]+C[idx] < caps[idx]) eligible.push(idx);
+  }
+  if (!eligible.length) return {idx:-1};
+  if (eligible.length > 1 && window.__lastAssigned !== undefined && eligible.includes(window.__lastAssigned)){
+    eligible = eligible.filter(x => x !== window.__lastAssigned);
+  }
+  let minL = Math.min(...eligible.map(idx=>loads[idx]));
+  let minSet = eligible.filter(idx => Math.abs(loads[idx]-minL) <= 1e-9);
+  if (minSet.length > 1){
+    const tgt = aptTarget(apt);
+    let best=[], bestDist=Infinity;
+    for(const idx of minSet){
+      const dist = Math.abs((D[idx]||1) - tgt);
+      if (dist < bestDist){ bestDist = dist; best=[idx]; }
+      else if (Math.abs(dist-bestDist) <= 1e-9){ best.push(idx); }
+    }
+    minSet = best;
+  }
+  let chosen = minSet[0];
+  if (minSet.length > 1) chosen = minSet[Math.floor(Math.random()*minSet.length)];
+  return {idx: chosen};
+}
+
+function nowSCL(){
+  try{ return new Intl.DateTimeFormat('es-CL',{dateStyle:'short',timeStyle:'medium',timeZone:'America/Santiago'}).format(new Date()); }
+  catch(e){ return new Date().toISOString(); }
+}
+
+function asignarUna(){
+  const type = gid('causeType').value;
+  const apt = gid('aptReq').value;
+  const p = getInputs();
+  const pick = pickGreedyOne(p, apt);
+  const idx = pick.idx;
+  if (idx === -1){ alert('No hay capacidad disponible.'); return; }
+
+  const L_before = weightedLoad(p.i,p.j,p.k, p.A[idx], p.B[idx], p.C[idx]);
+  const A0=p.A[idx], B0=p.B[idx], C0=p.C[idx];
+  const used0 = A0+B0+C0, cap0 = p.caps[idx];
+
+  const field = type==='A'? `f${idx+1}A` : (type==='B'? `f${idx+1}B` : `f${idx+1}C`);
+  gid(field).value = parseInt(gid(field).value||'0') + 1;
+
+  window.__history = window.__history || [];
+  window.__history.push({idx, type, apt});
+
+  const pAfter = getInputs();
+  const L_after = weightedLoad(pAfter.i,pAfter.j,pAfter.k, pAfter.A[idx], pAfter.B[idx], pAfter.C[idx]);
+  const A1=pAfter.A[idx], B1=pAfter.B[idx], C1=pAfter.C[idx];
+  const used1 = A1+B1+C1, cap1 = pAfter.caps[idx];
+
+  window.__log = window.__log || [];
+  window.__log.push({
+    ts: nowSCL(), funcionario: NAMES[idx], idx,
+    causa: type, aptitud: apt,
+    L_antes:+L_before.toFixed(2), L_despues:+L_after.toFixed(2),
+    A_antes:A0, B_antes:B0, C_antes:C0,
+    A_despues:A1, B_despues:B1, C_despues:C1,
+    capacidad: `${used0}/${cap0} → ${used1}/${cap1}`
+  });
+
+  window.__lastAssigned = idx;
+  render();
+}
+
+function deshacer(){
+  if (!window.__history || !window.__history.length){ alert('No hay acciones para deshacer.'); return; }
+  const last = window.__history.pop();
+  const aId = last.type==='A' ? `f${last.idx+1}A` : last.type==='B' ? `f${last.idx+1}B` : `f${last.idx+1}C`;
+  const v = parseInt(gid(aId).value||'0');
+  gid(aId).value = Math.max(0, v-1);
+  if (window.__log && window.__log.length) window.__log.pop();
+  window.__lastAssigned = window.__history.length ? window.__history[window.__history.length-1].idx : -1;
+  render();
+}
+
+function drawStackedChart(svgId, names, A, B, C){
+  const svg = document.getElementById(svgId);
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const w = svg.clientWidth || svg.parentElement.clientWidth;
+  const h = svg.clientHeight || 320;
+  const pad = {l:50,r:20,t:20,b:40};
+  const innerW = Math.max(10, w-pad.l-pad.r);
+  const innerH = Math.max(10, h-pad.t-pad.b);
+  const totals = names.map((_,i)=> A[i]+B[i]+C[i]);
+  const maxV = Math.max(1, ...totals);
+  const step = innerW / names.length;
+  const bw = step * 0.6;
+
+  const axis = document.createElementNS('http://www.w3.org/2000/svg','line');
+  axis.setAttribute('x1', pad.l); axis.setAttribute('y1', h - pad.b);
+  axis.setAttribute('x2', w - pad.r); axis.setAttribute('y2', h - pad.b);
+  axis.setAttribute('stroke', '#999'); axis.setAttribute('stroke-width', '1');
+  svg.appendChild(axis);
+
+  names.forEach((nm, i) => {
+    const x = pad.l + i*step + (step - bw)/2;
+    const total = totals[i];
+    let yTop = pad.t + innerH - (total/maxV)*innerH;
+
+    const hA = (A[i]/maxV)*innerH;
+    const rectA = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rectA.setAttribute('x', x); rectA.setAttribute('y', yTop);
+    rectA.setAttribute('width', bw); rectA.setAttribute('height', hA);
+    rectA.setAttribute('fill', '#94a3b8');
+    svg.appendChild(rectA);
+    yTop += hA;
+
+    const hB = (B[i]/maxV)*innerH;
+    const rectB = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rectB.setAttribute('x', x); rectB.setAttribute('y', yTop);
+    rectB.setAttribute('width', bw); rectB.setAttribute('height', hB);
+    rectB.setAttribute('fill', '#cbd5e1');
+    svg.appendChild(rectB);
+    yTop += hB;
+
+    const hC = (C[i]/maxV)*innerH;
+    const rectC = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rectC.setAttribute('x', x); rectC.setAttribute('y', yTop);
+    rectC.setAttribute('width', bw); rectC.setAttribute('height', hC);
+    rectC.setAttribute('fill', '#e5e7eb');
+    svg.appendChild(rectC);
+
+    const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
+    lbl.setAttribute('x', x + bw/2); lbl.setAttribute('y', h - pad.b + 16);
+    lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('font-size','12');
+    lbl.textContent = nm;
+    svg.appendChild(lbl);
+
+    const val = document.createElementNS('http://www.w3.org/2000/svg','text');
+    val.setAttribute('x', x + bw/2); val.setAttribute('y', pad.t + innerH - (total/maxV)*innerH - 6);
+    val.setAttribute('text-anchor','middle'); val.setAttribute('font-size','12');
+    val.textContent = total.toString();
+    svg.appendChild(val);
+  });
+}
+
+function drawTotalsChart(svgId, names, baseTotals, curTotals){
+  const svg = document.getElementById(svgId);
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const w = svg.clientWidth || svg.parentElement.clientWidth;
+  const h = svg.clientHeight || 320;
+  const pad = {l:50,r:20,t:20,b:40};
+  const innerW = Math.max(10, w-pad.l-pad.r);
+  const innerH = Math.max(10, h-pad.t-pad.b);
+  const maxV = Math.max(1, ...baseTotals, ...curTotals);
+  const step = innerW / names.length;
+  const bw = step * 0.35;
+
+  const axis = document.createElementNS('http://www.w3.org/2000/svg','line');
+  axis.setAttribute('x1', pad.l); axis.setAttribute('y1', h - pad.b);
+  axis.setAttribute('x2', w - pad.r); axis.setAttribute('y2', h - pad.b);
+  axis.setAttribute('stroke', '#999'); axis.setAttribute('stroke-width', '1');
+  svg.appendChild(axis);
+
+  names.forEach((nm, i) => {
+    const baseH = baseTotals[i] / maxV * innerH;
+    const curH  = curTotals[i]  / maxV * innerH;
+    const x0 = pad.l + i*step + (step - 2*bw)/2;
+    const x1 = x0 + bw + 6;
+
+    const y0 = pad.t + (innerH - baseH);
+    const r0 = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    r0.setAttribute('x', x0); r0.setAttribute('y', y0);
+    r0.setAttribute('width', bw); r0.setAttribute('height', baseH);
+    r0.setAttribute('fill', '#d1d5db');
+    svg.appendChild(r0);
+
+    const y1p = pad.t + (innerH - curH);
+    const r1 = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    r1.setAttribute('x', x1); r1.setAttribute('y', y1p);
+    r1.setAttribute('width', bw); r1.setAttribute('height', curH);
+    r1.setAttribute('fill', '#6b7280');
+    svg.appendChild(r1);
+
+    const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
+    lbl.setAttribute('x', x0 + bw + 3); lbl.setAttribute('y', h - pad.b + 16);
+    lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('font-size','12');
+    lbl.textContent = nm;
+    svg.appendChild(lbl);
+
+    const val = document.createElementNS('http://www.w3.org/2000/svg','text');
+    val.setAttribute('x', x1 + bw/2); val.setAttribute('y', y1p - 6);
+    val.setAttribute('text-anchor','middle'); val.setAttribute('font-size','12');
+    val.textContent = curTotals[i].toString();
+    svg.appendChild(val);
+  });
+}
+
+function drawAptChart(svgId, counts){
+  const svg = document.getElementById(svgId);
+  while(svg.firstChild) svg.removeChild(svg.firstChild);
+  const w = svg.clientWidth || svg.parentElement.clientWidth;
+  const h = svg.clientHeight || 320;
+  const pad = {l:50,r:20,t:20,b:40};
+  const innerW = Math.max(10, w-pad.l-pad.r);
+  const innerH = Math.max(10, h-pad.t-pad.b);
+  const labels = ['A','B','C'];
+  const maxV = Math.max(1, ...counts);
+  const step = innerW / labels.length;
+  const bw = step * 0.6;
+  const colors = ['#94a3b8','#cbd5e1','#e5e7eb'];
+
+  const axis = document.createElementNS('http://www.w3.org/2000/svg','line');
+  axis.setAttribute('x1', pad.l); axis.setAttribute('y1', h - pad.b);
+  axis.setAttribute('x2', w - pad.r); axis.setAttribute('y2', h - pad.b);
+  axis.setAttribute('stroke', '#999'); axis.setAttribute('stroke-width', '1');
+  svg.appendChild(axis);
+
+  labels.forEach((lab, i) => {
+    const v = counts[i];
+    const barH = v / maxV * innerH;
+    const x = pad.l + i*step + (step - bw)/2;
+    const y = pad.t + (innerH - barH);
+    const rect = document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rect.setAttribute('x', x); rect.setAttribute('y', y);
+    rect.setAttribute('width', bw); rect.setAttribute('height', barH);
+    rect.setAttribute('fill', colors[i]);
+    svg.appendChild(rect);
+
+    const lbl = document.createElementNS('http://www.w3.org/2000/svg','text');
+    lbl.setAttribute('x', x + bw/2); lbl.setAttribute('y', h - pad.b + 16);
+    lbl.setAttribute('text-anchor','middle'); lbl.setAttribute('font-size','12');
+    lbl.textContent = lab;
+    svg.appendChild(lbl);
+
+    const val = document.createElementNS('http://www.w3.org/2000/svg','text');
+    val.setAttribute('x', x + bw/2); val.setAttribute('y', y - 6);
+    val.setAttribute('text-anchor','middle'); val.setAttribute('font-size','12');
+    val.textContent = v.toString();
+    svg.appendChild(val);
+  });
+}
+
+function renderLog(){
+  const el = gid('logWrap');
+  const rows = (window.__log||[]).map(ev=>{
+    return `<tr>
+      <td>${ev.ts}</td>
+      <td>${ev.funcionario}</td>
+      <td>${ev.causa}</td>
+      <td>${ev.aptitud}</td>
+      <td>${ev.L_antes}→${ev.L_despues}</td>
+      <td>${ev.A_antes}→${ev.A_despues}</td>
+      <td>${ev.B_antes}→${ev.B_despues}</td>
+      <td>${ev.C_antes}→${ev.C_despues}</td>
+      <td>${ev.capacidad}</td>
+    </tr>`;
+  }).join('');
+  el.innerHTML = `<table>
+    <thead>
+      <tr>
+        <th>Fecha-hora</th><th>Funcionario</th><th>Causa</th><th>Aptitud req.</th>
+        <th>L antes→después</th><th>A antes→después</th><th>B antes→después</th><th>C antes→después</th>
+        <th>Capacidad</th>
+      </tr>
+    </thead>
+    <tbody>${rows || '<tr><td colspan="9" class="muted">Sin eventos aún.</td></tr>'}</tbody>
+  </table>`;
+}
+
+function render(){
+  const {i,j,k,A,B,C} = getInputs();
+  const loads = A.map((_,idx)=> weightedLoad(i,j,k, A[idx], B[idx], C[idx]));
+
+  const tableWrap = document.getElementById('tableWrap');
+  function cell(t){ return `<td>${t}</td>`; }
+  const rows = NAMES.map((nm,idx)=> {
+    const L = loads[idx].toFixed(2);
+    const assigned = (window.__history||[]).filter(h => h.idx===idx).length;
+    const total = A[idx]+B[idx]+C[idx];
+    return `<tr>${cell(nm)}${cell(total)}${cell(A[idx])}${cell(B[idx])}${cell(C[idx])}${cell(L)}${cell(assigned)}</tr>`;
+  }).join('');
+  const totalAsign = (window.__history||[]).length;
+  const sumA = A.reduce((a,b)=>a+b,0), sumB=B.reduce((a,b)=>a+b,0), sumC=C.reduce((a,b)=>a+b,0);
+  tableWrap.innerHTML = `<table>
+    <thead>
+      <tr><th>Funcionario</th><th>Total</th><th>A</th><th>B</th><th>C</th><th>Carga L</th><th>Nuevas asignadas</th></tr>
+    </thead>
+    <tbody>
+      ${rows}
+      <tr><td><b>Totales</b></td><td><b>${sumA+sumB+sumC}</b></td><td><b>${sumA}</b></td><td><b>${sumB}</b></td><td><b>${sumC}</b></td><td>—</td><td><b>${totalAsign}</b></td></tr>
+    </tbody>
+  </table>`;
+
+  drawStackedChart('chartStack', NAMES, A, B, C);
+
+  const baseTotals = window.__baselineTotals || [0,0,0];
+  const curTotals  = NAMES.map((_,i)=> A[i]+B[i]+C[i]);
+  drawTotalsChart('chartTotals', NAMES, baseTotals, curTotals);
+
+  const aptCounts = [0,0,0];
+  (window.__history||[]).forEach(h => { if (h.apt==='A') aptCounts[0]++; else if (h.apt==='B') aptCounts[1]++; else aptCounts[2]++; });
+  drawAptChart('chartApt', aptCounts);
+
+  const last = (window.__history && window.__history.length) ? window.__history[window.__history.length-1] : null;
+  gid('lastTag').textContent = 'Último asignado: ' + (last ? `${NAMES[last.idx]} · Causa ${last.type} · Aptitud ${last.apt}` : '—');
+  gid('lastTag2').textContent = gid('lastTag').textContent;
+
+  renderLog();
+}
+
+function guardarComoInicial(){
+  const {A,B,C} = getInputs();
+  window.__baselineTotals = NAMES.map((_,i)=> A[i]+B[i]+C[i]);
+  render();
+}
+
+function restablecer(){
+  gid('w_i').value = 1.0; gid('w_j').value = 0.5; gid('w_k').value = 0.25;
+  gid('cap1').value = 20; gid('cap2').value = 20; gid('cap3').value = 20;
+  gid('f1A').value = 3; gid('f1B').value = 5; gid('f1C').value = 4;
+  gid('f2A').value = 2; gid('f2B').value = 6; gid('f2C').value = 4;
+  gid('f3A').value = 2; gid('f3B').value = 6; gid('f3C').value = 1;
+  const hiddenD = ['f1D','f2D','f3D']; hiddenD.forEach(id=>{ const el = gid(id); if (el) el.value = '1'; });
+  gid('causeType').value = 'A'; gid('aptReq').value = 'B';
+  window.__history = []; window.__log = [];
+  const A0 = [3,2,2], B0=[5,6,6], C0=[4,4,1];
+  window.__baselineTotals = NAMES.map((_,i)=> A0[i]+B0[i]+C0[i]);
+  render();
+}
+
+function descargarCSV(){
+  const {i,j,k,A,B,C} = getInputs();
+  const loads = A.map((_,idx)=> weightedLoad(i,j,k, A[idx], B[idx], C[idx]));
+  const headers = ["Funcionario","Total","A","B","C","L","Asignadas_sesion","Inicial_total"];
+  const counts = new Array(NAMES.length).fill(0);
+  (window.__history||[]).forEach(h => counts[h.idx]++);
+  const rows = NAMES.map((nm,idx)=>[
+    nm, A[idx]+B[idx]+C[idx], A[idx], B[idx], C[idx], loads[idx].toFixed(2), counts[idx], (window.__baselineTotals?window.__baselineTotals[idx]:0)
+  ].join(","));
+  const csv = [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "visualizador_cargas_estado.csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function descargarLogCSV(){
+  const headers = ["timestamp","funcionario","causa","aptitud","L_antes","L_despues","A_antes","B_antes","C_antes","A_despues","B_despues","C_despues","capacidad"];
+  const rows = (window.__log||[]).map(ev=>[
+    ev.ts, ev.funcionario, ev.causa, ev.aptitud, ev.L_antes, ev.L_despues, ev.A_antes, ev.B_antes, ev.C_antes, ev.A_despues, ev.B_despues, ev.C_despues, ev.capacidad
+  ].join(","));
+  const csv = [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], {type: "text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "visualizador_cargas_log.csv";
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// Exponer handlers
+window.asignarUna = asignarUna;
+window.deshacer = deshacer;
+window.descargarCSV = descargarCSV;
+window.descargarLogCSV = descargarLogCSV;
+window.restablecer = restablecer;
+window.guardarComoInicial = guardarComoInicial;
+
+// Autotests básicos (no modifican el DOM)
+window.addEventListener('load', () => {
+  restablecer();
+  try {
+    console.assert(typeof window.asignarUna === 'function', 'asignarUna debe estar definida');
+    const p = getInputs();
+    console.assert(p.A.length === NAMES.length && p.B.length === NAMES.length && p.C.length === NAMES.length, 'A/B/C deben coincidir con NAMES');
+    console.assert(p.caps.length === NAMES.length, 'caps debe coincidir con NAMES');
+  } catch(e) { console.error(e); }
+});
+</script>
+</body>
+</html>
